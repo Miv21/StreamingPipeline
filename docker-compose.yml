@@ -1,52 +1,63 @@
 services:
-  redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:latest
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
     container_name: My-broker
-    command:
-      - redpanda start
-      - --overprovisioned
-      - --smp 1
-      - --memory 1G
-      - --reserve-memory 0M
-      - --node-id 0
-      - --check=false
     ports:
-      # Используем переменную для порта, если захотим сменить его в .env
       - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      # Настройки KRaft
+      KAFKA_NODE_ID: ${KAFKA_NODE_ID:-1}
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      
+      # Слушатели
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:${KAFKA_INTERNAL_PORT:-29092},PLAINTEXT_HOST://localhost:${KAFKA_PORT:-9092}'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      
+      # Идентификатор кластера (обязателен для KRaft)
+      # Можно сгенерировать любой случайный Base64 или оставить этот
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
 
   console:
     image: docker.redpanda.com/redpandadata/console:latest
     container_name: redpanda-console
     environment:
-      # Тут важно оставить внутреннее имя сервиса 'redpanda'
-      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BROKERS: "kafka:${KAFKA_INTERNAL_PORT:-29092}"
     ports:
       - "8080:8080"
     depends_on:
-      - redpanda
+      - kafka
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: clickhouse-server
-    # Подключаем наш файл с переменными
     env_file:
       - .env
     environment:
       - CLICKHOUSE_USER=${CH_USER}
       - CLICKHOUSE_PASSWORD=${CH_PASSWORD}
-      - CLICKHOUSE_DB=${CH_DB:-default}
+      - CLICKHOUSE_DB=${CH_DB}
     ports:
       - "8123:8123"
       - "8443:8443"
       - "9000:9000"
     user: "0:0"
     volumes:
-      - ./ch_config/clickhouse.crt:/etc/clickhouse-server/config.d/clickhouse.crt
-      - ./ch_config/clickhouse.key:/etc/clickhouse-server/config.d/clickhouse.key
-      - ./ch_config/custom_ssl.xml:/etc/clickhouse-server/config.d/ssl-config.xml
+      - ./ch_config/clickhouse.crt:/etc/clickhouse-server/config.d/clickhouse.crt:ro
+      - ./ch_config/clickhouse.key:/etc/clickhouse-server/config.d/clickhouse.key:ro
+      - ./ch_config/custom_ssl.xml:/etc/clickhouse-server/config.d/ssl-config.xml:ro
       - clickhouse_data:/var/lib/clickhouse
 
   grafana:
+    user: "0:0"
     image: grafana/grafana:latest
     container_name: grafana
     ports:

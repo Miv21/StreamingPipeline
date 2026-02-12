@@ -14,7 +14,7 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / '.env')
 KAFKA_TOPIC = 'Prices'
 # Берем адрес сервера из env (по умолчанию адрес сервера localhost:9092)
 KAFKA_SERVER = os.getenv('KAFKA_SERVER', 'localhost:9092')
-#Выбираем популярные активы для демонстрации (BITCOIN, ETHEREUM, SOLANA, BINANCE COIN)
+#Выбираем популярные активы для демонстрации (Bitcoin, Ethereum, Solana, Binance Coin)
 SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']
 
 #Инициализация продюсера
