@@ -1,0 +1,18 @@
+# Секреты и настройки (САМОЕ ВАЖНОЕ)
+.env
+
+# Python (технические файлы)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Редакторы кода (VS Code, PyCharm)
+.vscode/
+.idea/
+
+# Логи и временные файлы
+*.log
+.DS_Store

@@ -1,0 +1,64 @@
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: My-broker
+    command:
+      - redpanda start
+      - --overprovisioned
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --node-id 0
+      - --check=false
+    ports:
+      # Используем переменную для порта, если захотим сменить его в .env
+      - "${KAFKA_PORT:-9092}:9092"
+
+  console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: redpanda-console
+    environment:
+      # Тут важно оставить внутреннее имя сервиса 'redpanda'
+      KAFKA_BROKERS: "redpanda:9092"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redpanda
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-server
+    # Подключаем наш файл с переменными
+    env_file:
+      - .env
+    environment:
+      - CLICKHOUSE_USER=${CH_USER}
+      - CLICKHOUSE_PASSWORD=${CH_PASSWORD}
+      - CLICKHOUSE_DB=${CH_DB:-default}
+    ports:
+      - "8123:8123"
+      - "8443:8443"
+      - "9000:9000"
+    user: "0:0"
+    volumes:
+      - ./ch_config/clickhouse.crt:/etc/clickhouse-server/config.d/clickhouse.crt
+      - ./ch_config/clickhouse.key:/etc/clickhouse-server/config.d/clickhouse.key
+      - ./ch_config/custom_ssl.xml:/etc/clickhouse-server/config.d/ssl-config.xml
+      - clickhouse_data:/var/lib/clickhouse
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_INSTALL_PLUGINS=vertamedia-clickhouse-datasource
+    depends_on:
+      - clickhouse
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  clickhouse_data:
+  grafana_data:
