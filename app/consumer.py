@@ -1,112 +1,123 @@
 import os
 import json
+import pandas as pd
 from pathlib import Path
 from kafka import KafkaConsumer
 import clickhouse_connect
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env
+#Загружаем переменные из .env
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / '.env')
-# Настройки из окружения
+
 KAFKA_SERVER = os.getenv('KAFKA_SERVER', 'localhost:9092')
 CH_HOST = os.getenv('CH_HOST')
 CH_PORT = int(os.getenv('CH_PORT', 8443))
-CH_USER = os.getenv('CH_USER')
+CH_USER = os.getenv('CH_USER', 'default')
 CH_PASSWORD = os.getenv('CH_PASSWORD')
-# 2. Подключаемся к ClickHouse
+
+#Подключение к ClickHouse
 try:
     client = clickhouse_connect.get_client(
-        host=CH_HOST,
-        port=CH_PORT,
-        secure=True,
-        verify=False,
-        interface='https',
-        username=CH_USER,
-        password=CH_PASSWORD,
-        database='default'
+        host=CH_HOST, port=CH_PORT, secure=True, verify=False,
+        interface='https', username=CH_USER, password=CH_PASSWORD, database='default'
     )
-    print("Успешное HTTPS подключение к ClickHouse")
+    print("Успешное подключение к ClickHouse")
 except Exception as e:
-    print(f"Ошибка подключения: {e}")
-    exit()
+    print(f"Ошибка подключения: {e}"); exit()
 
-# 3. Создаем таблицу для КРИПТЫ (Prices) если её ещё нет.
+#Создание таблиц
 client.command('''
 CREATE TABLE IF NOT EXISTS Prices (
     symbol String,
     price Float64,
+    priceChange Float64,
+    volume Float64,
+    priceChangePercent Float64,
     timestamp String,
     source String DEFAULT 'Crypto'
-) ENGINE = MergeTree()
-ORDER BY (timestamp, symbol)
+) ENGINE = MergeTree() ORDER BY (timestamp, symbol)
 ''')
-# 4. Создаем таблицу для АКЦИЙ (Stocks_Price) если её ещё нет.
+
 client.command('''
 CREATE TABLE IF NOT EXISTS Stocks_Price (
     symbol String,
     price Float64,
     timestamp String,
     source String DEFAULT 'Finnhub'
-) ENGINE = MergeTree()
-ORDER BY (timestamp, symbol)
+) ENGINE = MergeTree() ORDER BY (timestamp, symbol)
 ''')
 
-# Объединяем все активы, для которых нужны отдельные Views
 assets = {
-    # Крипта
-    'btc_Prices': 'BTC',
-    'eth_Prices': 'ETH',
-    'sol_Prices': 'SOL',
+    #Криптовалюты (Данные из таблицы Prices)
+    'btc_Prices': 'BTC', 
+    'eth_Prices': 'ETH', 
+    'sol_Prices': 'SOL', 
     'bnb_Prices': 'BNB',
-    # Акции (новые)
-    'googl_Prices': 'GOOGL',
-    'nvda_Prices': 'NVDA',
-    'msft_Prices': 'MSFT',
-    'qcom_Prices': 'QCOM'
+    
+    #Акции (Данные из таблицы Stocks_Price)
+    'googl_Prices': 'GOOGL', 
+    'nvda_Prices': 'NVDA', 
+    'msft_Prices': 'MSFT', 
+    'qcom_Prices': 'QCOM',
+    'apple_Prices': 'AAPL'
 }
 
+#Список тикеров, которые относятся к акциям (для логики выбора таблицы)
+stock_tickers = ['GOOGL', 'NVDA', 'MSFT', 'QCOM', 'AAPL']
+
 for view_name, symbol in assets.items():
-    # Определяем, из какой таблицы брать данные для этой View
-    # Если тикер в списке акций, берем из Stocks_Price, иначе из Prices
-    source_table = 'Stocks_Price' if symbol in ['GOOGL', 'NVDA', 'MSFT', 'QCOM'] else 'Prices'
+    source_table = 'Stocks_Price' if symbol in stock_tickers else 'Prices'
+    client.command(f"DROP VIEW IF EXISTS {view_name}")
+    #Создаем заново
+    client.command(f"""
+        CREATE VIEW {view_name} AS 
+        SELECT * FROM {source_table} 
+        WHERE symbol = '{symbol}'
+    """)
 
-    client.command(f'''
-    CREATE VIEW IF NOT EXISTS {view_name} AS 
-    SELECT * FROM {source_table} WHERE symbol = '{symbol}'
-    ''')
+print(f"Все Views ({len(assets)}) успешно обновлены и синхронизированы.")
 
-# 5. Настраиваем Kafka Consumer на ДВА топика
+#Настройка Kafka Consumer
 consumer = KafkaConsumer(
-    'Prices', 
-    'Stocks_Price',
+    'Prices', 'Stocks_Price',
     bootstrap_servers=KAFKA_SERVER,
     auto_offset_reset='latest',
     group_id='my-group',
     value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
 
-print(f"Консьюмер запущен. Слушаю топики: Prices, Stocks_Price...")
+#Настройки батчинга
+batch_limit = 4 
+crypto_buffer = []
 
-# 6. Цикл обработки сообщений
+print(f"Consumer запущен. Лимит пачки: {batch_limit}. Слушаю Kafka...")
+
+
+
 try:
     for message in consumer:
         data = message.value
-        topic = message.topic  # Получаем имя топика (Prices или Stocks_Price)
-        # Подготовка данных
-        # Используем .get(), чтобы скрипт не падал, если какого-то поля нет
-        row = [
-            data.get('symbol'),
-            data.get('price'),
-            data.get('timestamp'),
-            data.get('source', 'Unknown')
-        ]
-        # Вставляем данные именно в ту таблицу, которая совпадает с именем топика
-        client.insert(
-            topic, 
-            [row], 
-            column_names=['symbol', 'price', 'timestamp', 'source']
-        )
-        print(f"[{topic}] Сохранено: {data['symbol']} | Цена: {data['price']}")
+        topic = message.topic
+
+        if topic == 'Prices':
+            #Обработка Крипты
+            if 'lastPrice' in data:
+                data['price'] = data.pop('lastPrice')
+            
+            crypto_buffer.append(data)
+
+            if len(crypto_buffer) >= batch_limit:
+                df = pd.DataFrame(crypto_buffer)
+                client.insert_df('Prices', df)
+                print(f"[Prices] Пакет из {len(df)} сохранен.")
+                crypto_buffer.clear()
+
+        elif topic == 'Stocks_Price':
+            # Обработка Акций (Single Insert)
+            row = [data.get('symbol'), data.get('price'), data.get('timestamp'), data.get('source', 'Finnhub')]
+            client.insert('Stocks_Price', [row], column_names=['symbol', 'price', 'timestamp', 'source'])
+            print(f"[Stocks] Сохранено: {data['symbol']}")
+
 except KeyboardInterrupt:
     print("Остановка консьюмера...")
 finally:
