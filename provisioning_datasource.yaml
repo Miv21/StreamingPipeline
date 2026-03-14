@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: ClickHouse
+    type: vertamedia-clickhouse-datasource
+    access: proxy
+    url: https://clickhouse-server:8443
+    jsonData:
+      skipTLSVerify: true
+      addCorsHeader: true
+      defaultDatabase: default
+    secureJsonData:
+      user: "${CH_USER}"
+      password: "${CH_PASSWORD}"
+    editable: true

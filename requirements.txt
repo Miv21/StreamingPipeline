@@ -1,0 +1,5 @@
+kafka-python
+clickhouse-connect
+pandas
+requests
+python-dotenv

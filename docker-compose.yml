@@ -25,6 +25,12 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 5s   
+      timeout: 10s  
+      retries: 3
+      start_period: 15s  
 
   console:
     image: docker.redpanda.com/redpandadata/console:latest
@@ -55,6 +61,12 @@ services:
       - ./ch_config/clickhouse.key:/etc/clickhouse-server/config.d/clickhouse.key:ro
       - ./ch_config/custom_ssl.xml:/etc/clickhouse-server/config.d/ssl-config.xml:ro
       - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "${CH_USER}", "--password", "${CH_PASSWORD}", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   grafana:
     user: "0:0"
@@ -69,6 +81,49 @@ services:
       - clickhouse
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./provisioning_datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yaml
+      - ./provisioning_dashboards.yaml:/etc/grafana/provisioning/dashboards/provisioning.yaml
+      - ./dashboards:/etc/grafana/provisioning/dashboards/files
+
+  # Продюсер криптовалют (Binance)
+  crypto-producer:
+    build: .
+    container_name: crypto-producer
+    command: python app/producer.py
+    env_file: .env
+    environment:
+      - KAFKA_SERVER=kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Продюсер акций (Finnhub)
+  stocks-producer:
+    build: .
+    container_name: stocks-producer
+    command: python app/producer_stocks.py
+    env_file: .env
+    environment:
+      - KAFKA_SERVER=kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Консьюмер (Запись в ClickHouse)
+  consumer:
+    build: .
+    container_name: crypto-consumer
+    command: python app/consumer.py
+    env_file: .env
+    environment:
+      - KAFKA_SERVER=kafka:29092
+      - CH_HOST=clickhouse-server
+      - CH_PORT=8443
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
 
 volumes:
   clickhouse_data:

@@ -52,7 +52,7 @@ def get_stock_payload(symbol):
         print(f"Ошибка при получении {symbol}: {e}")
         return None
 
-print(f"Producer запущен. Собираю рыночные данные...")
+print(f"Producer запущен. Собираю данные")
 
 try:
     while True:

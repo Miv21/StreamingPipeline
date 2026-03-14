@@ -36,7 +36,7 @@ def get_market_data(symbols):
         print(f"Ошибка при получении: {e}")
         return None
 
-print("Producer запущен. Собираю рыночные данные...")
+print("Producer запущен. Собираю данные")
 
 try:
     while True:
